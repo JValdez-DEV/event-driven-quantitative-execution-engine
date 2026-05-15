@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
 DATA_DIR = "/root/trade_hunter/massive_data"
-TIMEFRAMES = ["1min", "3min", "5min", "15min", "1H"]
+TIMEFRAMES = ["1min", "3min", "5min", "15min", "1h"]
 RISK_PCT = 0.01
 REWARD_MULT = 4.0
 LOOKBACK_DAYS = 180 # 6 Months Lookback Limit
@@ -191,8 +191,8 @@ def optimize():
         tf_str = best['tf']
         if 'min' in tf_str:
             tf_val = int(tf_str.replace('min', ''))
-        elif 'H' in tf_str:
-            tf_val = int(tf_str.replace('H', '')) * 60
+        elif 'h' in tf_str:
+            tf_val = int(tf_str.replace('h', '')) * 60
         else:
             tf_val = 5
             

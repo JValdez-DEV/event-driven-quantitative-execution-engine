@@ -28,7 +28,7 @@ def run_backtest(file_path, tf_override=None):
     # Use config if available, else default to 5m
     config = load_ticker_config()
     tf_val = tf_override if tf_override else config.get(ticker, 5)
-    tf_str = f"{tf_val}min" if tf_val < 60 else f"{tf_val//60}H"
+    tf_str = f"{tf_val}min" if tf_val < 60 else f"{tf_val//60}h"
     
     initial_capital = 10000 if ticker.startswith("X_") or "USD" in ticker else 100000
     

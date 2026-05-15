@@ -178,7 +178,7 @@ class LiveVelocityEngine:
     def fetch_data(self):
         try:
             # Convert numeric timeframe to CCXT string
-            tf_str = f'{self.tf}m' if self.tf < 60 else f'{self.tf//60}h'
+            tf_str = f'{self.tf}min' if self.tf < 60 else f'{self.tf//60}h'
             ohlcv_tf = self.exchange.fetch_ohlcv(self.symbol, timeframe=tf_str, limit=250)
             ohlcv_1m = self.exchange.fetch_ohlcv(self.symbol, timeframe='1m', limit=5)
             

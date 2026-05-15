@@ -52,9 +52,20 @@ def run_backtest(file_path):
     df_5m['FVG_Mid'] = (df_5m['Low'] + df_5m['c1_High']) / 2
     df_5m['FVG_Stop'] = df_5m['c2_Low']
 
-    score_vol = (df_5m['Volume'] > df_5m['Vol_MA20']).astype(int) * 30
-    score_rsi = ((df_5m['RSI'] >= 40) & (df_5m['RSI'] <= 70)).astype(int) * 30
-    df_5m['Score'] = score_vol + score_rsi
+    # --- OPTIMIZED SCORE 60 MATRIX ---
+    df_5m['ADX'] = ta.adx(df_5m['High'], df_5m['Low'], df_5m['Close'], length=14)['ADX_14']
+    
+    def get_score(row, ticker):
+        vol_mult = 1.2 if ticker in ["NVDA", "X_SOLUSD"] else 1.0
+        rsi_max = 65 if ticker in ["NVDA", "X_SOLUSD"] else 70
+        min_adx = 25 if ticker in ["NVDA", "X_SOLUSD"] else 0
+        
+        s_vol = 30 if row['Volume'] > (row['Vol_MA20'] * vol_mult) else 0
+        s_rsi = 30 if 40 <= row['RSI'] <= rsi_max else 0
+        s_penalty = -20 if (min_adx > 0 and row['ADX'] < min_adx) else 0
+        return s_vol + s_rsi + s_penalty
+
+    df_5m['Score'] = df_5m.apply(lambda x: get_score(x, ticker), axis=1)
     df_5m['Trend_Up'] = df_5m['Close'] > df_5m['SMA200']
     df_5m['ChoCH'] = df_5m['Close'] > df_5m['Recent_High']
 

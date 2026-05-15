@@ -212,6 +212,11 @@ class LiveVelocityEngine:
         df_tf['SMA200'] = ta.sma(df_tf['close'], length=200)
         df_tf['RSI'] = ta.rsi(df_tf['close'], length=14)
         df_tf['Vol_MA20'] = ta.sma(df_tf['volume'], length=20)
+        
+        # --- V3.6 VELOCITY OPTIMIZATION: ADX FOR VOLATILITY FILTERING ---
+        adx_df = ta.adx(df_tf['high'], df_tf['low'], df_tf['close'], length=14)
+        df_tf['ADX'] = adx_df['ADX_14'] if adx_df is not None else 0
+        
         df_tf['Recent_High'] = df_tf['high'].rolling(window=10).max().shift(1)
         df_tf['ChoCH'] = df_tf['close'] > df_tf['Recent_High']
         
@@ -228,9 +233,26 @@ class LiveVelocityEngine:
         df_tf['FVG_Stop'] = df_tf['c2_Low']
 
         last = df_tf.iloc[-1]
-        score_vol = 30 if last['volume'] > last['Vol_MA20'] else 0
-        score_rsi = 30 if 40 <= last['RSI'] <= 70 else 0
-        score = score_vol + score_rsi
+        
+        # --- OPTIMIZED SCORE 60 MATRIX ---
+        # Default thresholds
+        vol_mult = 1.0
+        rsi_min, rsi_max = 40, 70
+        min_adx = 0
+        
+        # Asset-specific overrides for NVDA and SOL
+        if self.ticker in ["NVDA", "X_SOLUSD"]:
+            vol_mult = 1.2  # Require 20% more volume than average
+            rsi_max = 65    # Tighter RSI ceiling to avoid parabolic traps
+            min_adx = 25    # Ensure strong trend strength
+            
+        score_vol = 30 if last['volume'] > (last['Vol_MA20'] * vol_mult) else 0
+        score_rsi = 30 if rsi_min <= last['RSI'] <= rsi_max else 0
+        
+        # Penalty for weak trend on high-beta assets
+        score_penalty = -20 if (min_adx > 0 and last['ADX'] < min_adx) else 0
+        
+        score = score_vol + score_rsi + score_penalty
 
         if self.exchange_id == 'kraken' or (datetime.now().second % 30 == 0):
              print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.ticker:<10} | Score: {score}/60 | Price: {last['close']:.2f}")

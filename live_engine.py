@@ -65,6 +65,11 @@ def ccxt_timeframe(minutes):
     return f"{minutes}m" if minutes < 60 else f"{minutes // 60}h"
 
 
+def is_utc_weekend(now=None):
+    now = now or datetime.now(timezone.utc)
+    return now.weekday() >= 5
+
+
 def notify_discord(title, fields, color=5763719, description=None):
     if not DISCORD_URL:
         return
@@ -205,11 +210,13 @@ class LiveVelocityEngine:
         self.tf = int(timeframe)
 
         if ticker.startswith("X_"):
+            self.asset_class = "crypto"
             self.exchange_id = "kraken"
             self.symbol = ticker.replace("X_", "").replace("USD", "/USD")
         else:
+            self.asset_class = "equity"
             self.exchange_id = "alpaca"
-            self.symbol = f"{ticker}/USD"
+            self.symbol = ticker
 
         exchange_class = getattr(ccxt, self.exchange_id)
         api_key = os.getenv(f"{self.exchange_id.upper()}_API_KEY")
@@ -229,6 +236,9 @@ class LiveVelocityEngine:
         self.exchange.load_markets()
 
     def fetch_data(self):
+        if self.asset_class == "equity" and is_utc_weekend():
+            return None, None
+
         try:
             ohlcv_tf = self.exchange.fetch_ohlcv(self.symbol, timeframe=ccxt_timeframe(self.tf), limit=250)
             ohlcv_1m = self.exchange.fetch_ohlcv(self.symbol, timeframe="1m", limit=5)
@@ -340,7 +350,7 @@ class LiveVelocityEngine:
         score = score_vol + score_rsi + score_penalty
 
         if self.exchange_id == "kraken" or (datetime.now(timezone.utc).second % 30 == 0):
-            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {self.ticker:<10} | TF: {self.tf}m | Score: {score}/60 | Price: {last['close']:.2f}")
+            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {self.ticker:<10} | Symbol: {self.symbol:<10} | TF: {self.tf}m | Score: {score}/60 | Price: {last['close']:.2f}")
 
         active = [t for t in load_active_trades() if t["ticker"] == self.ticker]
         if active:

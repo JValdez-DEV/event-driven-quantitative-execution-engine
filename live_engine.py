@@ -27,6 +27,10 @@ ACTIVE_TRADES_FILE = "/root/trade_hunter/active_trades.json"
 MASTER_CSV_FILE = "/root/trade_hunter/master_trade_log.csv"
 # -------------------------------------
 
+# --- KILL SWITCH CONFIG ---
+DAILY_LOSS_LIMIT_PCT = -0.03
+# --------------------------
+
 def notify_discord(title, fields, color=5763719, description=None):
     if not DISCORD_URL:
         return
@@ -87,6 +91,51 @@ def update_daily_stats(pnl=0.0):
         json.dump(stats, f)
         
     return stats["total_pnl"]
+
+def check_kill_switch(balance):
+    """
+    Checks if the daily loss limit has been breached.
+    Returns True if the kill switch is active (trading halted).
+    """
+    if not os.path.exists(STATS_FILE):
+        return False
+        
+    try:
+        with open(STATS_FILE, 'r') as f:
+            stats = json.load(f)
+        
+        # Ensure stats are for today
+        if stats.get("date") != str(datetime.now().date()):
+            return False
+            
+        daily_pnl = stats.get("total_pnl", 0.0)
+        threshold = balance * DAILY_LOSS_LIMIT_PCT
+        
+        if daily_pnl <= threshold:
+            return True
+    except Exception:
+        pass
+    return False
+
+def activate_kill_switch(exchange, symbols, balance, daily_pnl):
+    """
+    Cancels all open orders and notifies Discord.
+    """
+    for symbol in symbols:
+        try:
+            exchange.cancel_all_orders(symbol)
+        except Exception as e:
+            print(f"[!] Failed to cancel orders for {symbol}: {e}")
+            
+    fields = {
+        "Status": "🚨 KILL SWITCH ACTIVATED",
+        "Reason": f"Daily Loss Limit Breached ({DAILY_LOSS_LIMIT_PCT*100:.1f}%)",
+        "Account Balance": f"${balance:,.2f}",
+        "Daily PnL": f"${daily_pnl:,.2f}",
+        "Action": "All open orders cancelled. New entries halted until 00:00 UTC."
+    }
+    notify_discord("CRITICAL: Kill Switch Active", fields, color=15548997)
+    print(f"[!!!] KILL SWITCH ACTIVE | Daily PnL: ${daily_pnl:,.2f} | Threshold: ${balance * DAILY_LOSS_LIMIT_PCT:,.2f}")
 
 def load_active_trades():
     if not os.path.exists(ACTIVE_TRADES_FILE):
@@ -201,6 +250,20 @@ class LiveVelocityEngine:
                 save_active_trades(all_trades)
 
     def analyze_and_execute(self):
+        # 1. Check Kill Switch
+        balance = 0.0
+        try:
+            if self.exchange_id == 'kraken' and os.getenv("KRAKEN_MODE") == "PAPER":
+                balance = float(os.getenv("KRAKEN_PAPER_BAL", 10000.0))
+            else:
+                balance_data = self.exchange.fetch_balance()
+                balance = float(balance_data['total'].get('USD', 0.0))
+        except Exception:
+            pass
+
+        if check_kill_switch(balance):
+            return
+
         df_tf, df_1m = self.fetch_data()
         
         if df_tf is None or len(df_tf) < 200:
@@ -320,8 +383,35 @@ if __name__ == "__main__":
     engines = [LiveVelocityEngine(t) for t in OPTIMAL_ROUTING.keys()]
     
     update_daily_stats(0.0)
+    kill_switch_triggered = False
 
     while True:
+        # Check Kill Switch across all engines
+        try:
+            primary_engine = engines[0]
+            if primary_engine.exchange_id == 'kraken' and os.getenv("KRAKEN_MODE") == "PAPER":
+                balance = float(os.getenv("KRAKEN_PAPER_BAL", 10000.0))
+            else:
+                balance_data = primary_engine.exchange.fetch_balance()
+                balance = float(balance_data['total'].get('USD', 0.0))
+            
+            if check_kill_switch(balance):
+                if not kill_switch_triggered:
+                    with open(STATS_FILE, 'r') as f:
+                        stats = json.load(f)
+                    daily_pnl = stats.get("total_pnl", 0.0)
+                    symbols = [e.symbol for e in engines]
+                    activate_kill_switch(primary_engine.exchange, symbols, balance, daily_pnl)
+                    kill_switch_triggered = True
+                
+                # Wait until next day reset
+                time.sleep(60)
+                continue
+            else:
+                kill_switch_triggered = False
+        except Exception:
+            pass
+
         for engine in engines: 
             engine.analyze_and_execute()
             time.sleep(1.5)

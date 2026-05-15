@@ -1,20 +1,26 @@
 import pandas as pd
-import sys
-from unittest.mock import MagicMock
-sys.modules['pandas_ta'] = MagicMock()
-import pandas_ta as ta
 import glob
 import os
 import json
+import gc
 from datetime import datetime, timedelta
-from concurrent.futures import ProcessPoolExecutor
 
 # --- CONFIGURATION ---
 DATA_DIR = "/root/trade_hunter/massive_data"
 TIMEFRAMES = ["1min", "3min", "5min", "15min", "1H"]
 RISK_PCT = 0.01
 REWARD_MULT = 4.0
+LOOKBACK_DAYS = 180 # 6 Months Lookback Limit
 # ---------------------
+
+# Mock pandas_ta if not available
+try:
+    import pandas_ta as ta
+except ImportError:
+    import sys
+    from unittest.mock import MagicMock
+    sys.modules['pandas_ta'] = MagicMock()
+    import pandas_ta as ta
 
 def run_backtest_tf(file_path, tf):
     filename = os.path.basename(file_path)
@@ -24,17 +30,28 @@ def run_backtest_tf(file_path, tf):
     
     # 1. Load 1m Raw Data
     try:
+        # Use chunking or just read and immediately filter to save memory
         df_1m = pd.read_csv(file_path)
     except Exception:
         return None
 
     time_col = next((c for c in df_1m.columns if c.lower() in ['timestamp', 'time', 'date']), None)
     if not time_col:
+        del df_1m
         return None
     
     df_1m[time_col] = pd.to_datetime(df_1m[time_col])
     df_1m.set_index(time_col, inplace=True)
     df_1m.sort_index(inplace=True)
+    
+    # --- MEMORY OPTIMIZATION: 6 MONTH LOOKBACK LIMIT ---
+    cutoff_date = df_1m.index.max() - timedelta(days=LOOKBACK_DAYS)
+    df_1m = df_1m[df_1m.index >= cutoff_date]
+    
+    if df_1m.empty:
+        del df_1m
+        return None
+
     df_1m.columns = [c.capitalize() for c in df_1m.columns]
 
     # 2. Resample to Target Timeframe
@@ -43,6 +60,8 @@ def run_backtest_tf(file_path, tf):
     }).dropna()
 
     if len(df_tf) < 200:
+        del df_1m
+        del df_tf
         return None
 
     # --- INDICATORS ---
@@ -122,32 +141,36 @@ def run_backtest_tf(file_path, tf):
     wr = (wins / total * 100) if total > 0 else 0
     net_pnl = balance - initial_capital
     
-    return {
+    result = {
         "ticker": ticker,
         "tf": tf,
         "net_pnl": net_pnl,
         "win_rate": wr,
         "trades": total
     }
+    
+    # --- MEMORY PRUNING ---
+    del df_1m
+    del df_tf
+    gc.collect()
+    
+    return result
 
 def optimize():
     csv_files = glob.glob(os.path.join(DATA_DIR, "*_1m_master.csv"))
     if not csv_files:
         print(f"No data found in {DATA_DIR}")
-        # Fallback for testing if directory is empty
         return
         
     results = []
     print(f"Optimizing {len(csv_files)} assets across {len(TIMEFRAMES)} timeframes...")
+    print(f"Mode: SEQUENTIAL EXECUTION | Lookback: {LOOKBACK_DAYS} Days")
     
-    with ProcessPoolExecutor() as executor:
-        futures = []
-        for f in csv_files:
-            for tf in TIMEFRAMES:
-                futures.append(executor.submit(run_backtest_tf, f, tf))
-        
-        for future in futures:
-            res = future.result()
+    # --- SEQUENTIAL EXECUTION ---
+    for f in csv_files:
+        for tf in TIMEFRAMES:
+            print(f"Processing {os.path.basename(f)} @ {tf}...")
+            res = run_backtest_tf(f, tf)
             if res:
                 results.append(res)
 
@@ -164,16 +187,14 @@ def optimize():
     print("-" * 50)
     
     for t, res_list in ticker_results.items():
-        # Sort by Net PNL, then Win Rate
         best = sorted(res_list, key=lambda x: (x['net_pnl'], x['win_rate']), reverse=True)[0]
-        # Convert pandas frequency to engine format (e.g., '5min' -> 5, '1H' -> 60)
         tf_str = best['tf']
         if 'min' in tf_str:
             tf_val = int(tf_str.replace('min', ''))
         elif 'H' in tf_str:
             tf_val = int(tf_str.replace('H', '')) * 60
         else:
-            tf_val = 5 # Default
+            tf_val = 5
             
         config[t] = tf_val
         print(f"{t:<10} | {tf_str:<8} | ${best['net_pnl']:,.2f} | {best['win_rate']:.2f}%")

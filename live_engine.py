@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- V3.6 PRODUCTION CONFIGURATION ---
-OPTIMAL_ROUTING = {
+DEFAULT_ROUTING = {
     "NVDA": 5, "TSLA": 5, "AMD": 5, "MSFT": 5,
     "X_BTCUSD": 5, "X_ETHUSD": 5, "X_SOLUSD": 5
 }
@@ -25,7 +25,21 @@ STATS_FILE = "/root/trade_hunter/daily_stats.json"
 LEDGER_FILE = "/root/trade_hunter/kraken_paper_ledger.json"
 ACTIVE_TRADES_FILE = "/root/trade_hunter/active_trades.json"
 MASTER_CSV_FILE = "/root/trade_hunter/master_trade_log.csv"
+CONFIG_FILE = "ticker_config.json"
 # -------------------------------------
+
+# --- KILL SWITCH CONFIG ---
+DAILY_LOSS_LIMIT_PCT = -0.03
+# --------------------------
+
+def load_ticker_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[!] Error loading {CONFIG_FILE}: {e}")
+    return DEFAULT_ROUTING
 
 def notify_discord(title, fields, color=5763719, description=None):
     if not DISCORD_URL:
@@ -88,6 +102,37 @@ def update_daily_stats(pnl=0.0):
         
     return stats["total_pnl"]
 
+def check_kill_switch(balance):
+    if not os.path.exists(STATS_FILE):
+        return False
+    try:
+        with open(STATS_FILE, 'r') as f:
+            stats = json.load(f)
+        if stats.get("date") != str(datetime.now().date()):
+            return False
+        daily_pnl = stats.get("total_pnl", 0.0)
+        threshold = balance * DAILY_LOSS_LIMIT_PCT
+        if daily_pnl <= threshold:
+            return True
+    except Exception:
+        pass
+    return False
+
+def activate_kill_switch(exchange, symbols, balance, daily_pnl):
+    for symbol in symbols:
+        try:
+            exchange.cancel_all_orders(symbol)
+        except Exception as e:
+            print(f"[!] Failed to cancel orders for {symbol}: {e}")
+    fields = {
+        "Status": "🚨 KILL SWITCH ACTIVATED",
+        "Reason": f"Daily Loss Limit Breached ({DAILY_LOSS_LIMIT_PCT*100:.1f}%)",
+        "Account Balance": f"${balance:,.2f}",
+        "Daily PnL": f"${daily_pnl:,.2f}",
+        "Action": "All open orders cancelled. New entries halted until 00:00 UTC."
+    }
+    notify_discord("CRITICAL: Kill Switch Active", fields, color=15548997)
+
 def load_active_trades():
     if not os.path.exists(ACTIVE_TRADES_FILE):
         return []
@@ -102,9 +147,9 @@ def save_active_trades(trades):
         json.dump(trades, f, indent=4)
 
 class LiveVelocityEngine:
-    def __init__(self, ticker):
+    def __init__(self, ticker, timeframe):
         self.ticker = ticker
-        self.tf = OPTIMAL_ROUTING.get(ticker, 5)
+        self.tf = timeframe
         
         if ticker.startswith("X_"):
             self.exchange_id = 'kraken'
@@ -132,7 +177,9 @@ class LiveVelocityEngine:
 
     def fetch_data(self):
         try:
-            ohlcv_tf = self.exchange.fetch_ohlcv(self.symbol, timeframe=f'{self.tf}m', limit=250)
+            # Convert numeric timeframe to CCXT string
+            tf_str = f'{self.tf}m' if self.tf < 60 else f'{self.tf//60}h'
+            ohlcv_tf = self.exchange.fetch_ohlcv(self.symbol, timeframe=tf_str, limit=250)
             ohlcv_1m = self.exchange.fetch_ohlcv(self.symbol, timeframe='1m', limit=5)
             
             if not ohlcv_tf or not ohlcv_1m:
@@ -155,11 +202,9 @@ class LiveVelocityEngine:
         my_trades = [t for t in all_trades if t['ticker'] == self.ticker]
         
         for t in my_trades:
-            # 1. RISK ELIMINATED PROTOCOL (1R Hit)
             if not t['risk_eliminated'] and current_price >= (t['entry'] + t['initial_risk']):
                 t['risk_eliminated'] = True
                 t['sl'] = t['entry']
-                
                 if t['mode'] == 'LIVE':
                     try:
                         self.exchange.cancel_all_orders(self.symbol)
@@ -169,42 +214,40 @@ class LiveVelocityEngine:
                         )
                     except Exception as e:
                         print(f"[!] Alpaca Hard Stop Update Failed: {e}")
-
                 save_active_trades(all_trades)
-                desc = "Price secured 1R distance. Server bracket stop moved to breakeven."
-                notify_discord("🛡️ Risk Eliminated", {"Ticker": self.ticker, "New Stop Level": f"${t['sl']:,.2f}"}, color=16705372, description=desc)
+                notify_discord("🛡️ Risk Eliminated", {"Ticker": self.ticker, "New Stop Level": f"${t['sl']:,.2f}"}, color=16705372)
 
-            # 2. EXIT PROTOCOLS
             if current_price <= t['sl'] or current_price >= t['tp']:
                 trigger = "STOP LOSS (SOFT) HIT" if current_price <= t['sl'] else "TAKE PROFIT (SOFT) HIT"
-                if t['mode'] == 'LIVE':
-                    trigger = trigger.replace("SOFT", "HARD")
-                
+                if t['mode'] == 'LIVE': trigger = trigger.replace("SOFT", "HARD")
                 close_price = t['sl'] if current_price <= t['sl'] else t['tp']
                 pnl = (close_price - t['entry']) * t['qty']
                 realized_today = update_daily_stats(pnl)
-                
                 fields = {
-                    "Ticker": self.ticker,
-                    "Action": f"🔴 MARKET SELL ({t['mode']})",
-                    "Quantity Closed": f"{t['qty']:.4f}",
-                    "Net PnL": f"${pnl:,.2f}",
-                    "Close Price": f"${close_price:,.2f}",
-                    "Realized Today": f"{'🔴' if realized_today < 0 else '🟢'} ${realized_today:,.2f}",
+                    "Ticker": self.ticker, "Action": f"🔴 MARKET SELL ({t['mode']})",
+                    "Quantity Closed": f"{t['qty']:.4f}", "Net PnL": f"${pnl:,.2f}",
+                    "Close Price": f"${close_price:,.2f}", "Realized Today": f"${realized_today:,.2f}",
                     "Trigger Logic": trigger
                 }
                 notify_discord(f"Position Closed ({t['mode']})", fields, color=15548997)
-                
                 log_to_master_csv(self.ticker, t['mode'], "EXIT", t['entry'], close_price, t['qty'], pnl, trigger, t['risk_eliminated'])
-                
                 all_trades.remove(t)
                 save_active_trades(all_trades)
 
     def analyze_and_execute(self):
+        balance = 0.0
+        try:
+            if self.exchange_id == 'kraken' and os.getenv("KRAKEN_MODE") == "PAPER":
+                balance = float(os.getenv("KRAKEN_PAPER_BAL", 10000.0))
+            else:
+                balance_data = self.exchange.fetch_balance()
+                balance = float(balance_data['total'].get('USD', 0.0))
+        except Exception: pass
+
+        if check_kill_switch(balance): return
+
         df_tf, df_1m = self.fetch_data()
-        
-        if df_tf is None or len(df_tf) < 200:
-            return
+        if df_tf is None or len(df_tf) < 200: return
         
         current_price = df_1m['close'].iloc[-1]
         self.manage_telemetry(current_price)
@@ -212,20 +255,13 @@ class LiveVelocityEngine:
         df_tf['SMA200'] = ta.sma(df_tf['close'], length=200)
         df_tf['RSI'] = ta.rsi(df_tf['close'], length=14)
         df_tf['Vol_MA20'] = ta.sma(df_tf['volume'], length=20)
-        
-        # --- V3.6 VELOCITY OPTIMIZATION: ADX FOR VOLATILITY FILTERING ---
         adx_df = ta.adx(df_tf['high'], df_tf['low'], df_tf['close'], length=14)
         df_tf['ADX'] = adx_df['ADX_14'] if adx_df is not None else 0
-        
         df_tf['Recent_High'] = df_tf['high'].rolling(window=10).max().shift(1)
         df_tf['ChoCH'] = df_tf['close'] > df_tf['Recent_High']
-        
         df_tf = df_tf.dropna(subset=['SMA200'])
-        if df_tf.empty:
-            return
-            
+        if df_tf.empty: return
         df_tf['Trend_Up'] = df_tf['close'] > df_tf['SMA200']
-
         df_tf['c1_High'] = df_tf['high'].shift(2)
         df_tf['c2_Low'] = df_tf['low'].shift(1)
         df_tf['FVG_Bullish'] = df_tf['low'] > df_tf['c1_High']
@@ -233,33 +269,19 @@ class LiveVelocityEngine:
         df_tf['FVG_Stop'] = df_tf['c2_Low']
 
         last = df_tf.iloc[-1]
-        
-        # --- OPTIMIZED SCORE 60 MATRIX ---
-        # Default thresholds
-        vol_mult = 1.0
-        rsi_min, rsi_max = 40, 70
-        min_adx = 0
-        
-        # Asset-specific overrides for NVDA and SOL
-        if self.ticker in ["NVDA", "X_SOLUSD"]:
-            vol_mult = 1.2  # Require 20% more volume than average
-            rsi_max = 65    # Tighter RSI ceiling to avoid parabolic traps
-            min_adx = 25    # Ensure strong trend strength
-            
+        vol_mult = 1.2 if self.ticker in ["NVDA", "X_SOLUSD"] else 1.0
+        rsi_max = 65 if self.ticker in ["NVDA", "X_SOLUSD"] else 70
+        min_adx = 25 if self.ticker in ["NVDA", "X_SOLUSD"] else 0
         score_vol = 30 if last['volume'] > (last['Vol_MA20'] * vol_mult) else 0
-        score_rsi = 30 if rsi_min <= last['RSI'] <= rsi_max else 0
-        
-        # Penalty for weak trend on high-beta assets
+        score_rsi = 30 if 40 <= last['RSI'] <= rsi_max else 0
         score_penalty = -20 if (min_adx > 0 and last['ADX'] < min_adx) else 0
-        
         score = score_vol + score_rsi + score_penalty
 
         if self.exchange_id == 'kraken' or (datetime.now().second % 30 == 0):
-             print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.ticker:<10} | Score: {score}/60 | Price: {last['close']:.2f}")
+             print(f"[{datetime.now().strftime('%H:%M:%S')}] {self.ticker:<10} | TF: {self.tf}m | Score: {score}/60 | Price: {last['close']:.2f}")
 
         active = [t for t in load_active_trades() if t['ticker'] == self.ticker]
-        if active:
-            return 
+        if active: return 
 
         if last['Trend_Up'] and last['ChoCH'] and last['FVG_Bullish'] and score >= 60:
             if df_1m['low'].iloc[-1] <= last['FVG_Mid'] and current_price >= last['c1_High']:
@@ -269,59 +291,58 @@ class LiveVelocityEngine:
         try:
             is_kraken_paper = (self.exchange_id == 'kraken' and os.getenv("KRAKEN_MODE") == "PAPER")
             mode = "PAPER" if is_kraken_paper else "LIVE"
-            
-            if is_kraken_paper:
-                balance = float(os.getenv("KRAKEN_PAPER_BAL", 10000.0))
+            if is_kraken_paper: balance = float(os.getenv("KRAKEN_PAPER_BAL", 10000.0))
             else:
                 balance_data = self.exchange.fetch_balance()
                 balance = float(balance_data['total'].get('USD', 0.0))
-                
-            if balance < 1.0:
-                return
-            
+            if balance < 1.0: return
             sl = signal_row['FVG_Stop']
-            if sl >= entry_p:
-                sl = entry_p * 0.99
-                
+            if sl >= entry_p: sl = entry_p * 0.99
             risk_dist = entry_p - sl
             qty = (balance * RISK_PCT) / risk_dist
             tp = entry_p + (risk_dist * REWARD_MULTIPLIER)
-
             if not is_kraken_paper:
                 self.exchange.create_order(
                     symbol=self.symbol, type='limit', side='buy', amount=qty, price=entry_p,
                     params={'stopLossPrice': round(sl, 2), 'takeProfitPrice': round(tp, 2), 'ocoOrder': True}
                 )
-            
             all_trades = load_active_trades()
             all_trades.append({
                 "ticker": self.ticker, "mode": mode, "qty": qty, "entry": entry_p,
                 "sl": sl, "tp": tp, "initial_risk": risk_dist, "risk_eliminated": False
             })
             save_active_trades(all_trades)
-
             log_to_master_csv(self.ticker, mode, "ENTRY", entry_p, 0.0, qty, 0.0, "SCORE 60", False)
-
             fields = {
-                "Ticker": self.ticker,
-                "Action": f"🟢 SIMULATED BUY (LOCAL)" if is_kraken_paper else "🟢 BUY (LIVE)",
-                "Quantity": f"{qty:.4f}",
-                "Entry Price": f"${entry_p:,.2f}",
-                f"{'Soft' if is_kraken_paper else 'Hard'} Stop (1R)": f"${sl:,.2f}",
-                f"{'Soft' if is_kraken_paper else 'Hard'} TP (4R)": f"${tp:,.2f}"
+                "Ticker": self.ticker, "Action": f"🟢 BUY ({mode})", "Quantity": f"{qty:.4f}",
+                "Entry Price": f"${entry_p:,.2f}", "Stop": f"${sl:,.2f}", "TP": f"${tp:,.2f}"
             }
             notify_discord(f"Target Acquired ({mode})", fields, color=5763719)
-
         except Exception as e:
             notify_discord("Execution Error", {"Ticker": self.ticker, "Error": str(e)}, color=15548997)
 
 if __name__ == "__main__":
-    print(f"\n{'='*60}\nV3.6 VELOCITY | TELEMETRY + DAEMON ACTIVE\n{'='*60}")
-    engines = [LiveVelocityEngine(t) for t in OPTIMAL_ROUTING.keys()]
-    
+    print(f"\n{'='*60}\nV3.6 VELOCITY | DYNAMIC TF ROUTING ACTIVE\n{'='*60}")
+    config = load_ticker_config()
+    engines = [LiveVelocityEngine(t, config.get(t, 5)) for t in config.keys()]
     update_daily_stats(0.0)
-
+    kill_switch_triggered = False
     while True:
+        try:
+            primary_engine = engines[0]
+            if primary_engine.exchange_id == 'kraken' and os.getenv("KRAKEN_MODE") == "PAPER":
+                balance = float(os.getenv("KRAKEN_PAPER_BAL", 10000.0))
+            else:
+                balance_data = primary_engine.exchange.fetch_balance()
+                balance = float(balance_data['total'].get('USD', 0.0))
+            if check_kill_switch(balance):
+                if not kill_switch_triggered:
+                    with open(STATS_FILE, 'r') as f: stats = json.load(f)
+                    activate_kill_switch(primary_engine.exchange, [e.symbol for e in engines], balance, stats.get("total_pnl", 0.0))
+                    kill_switch_triggered = True
+                time.sleep(60); continue
+            else: kill_switch_triggered = False
+        except Exception: pass
         for engine in engines: 
             engine.analyze_and_execute()
             time.sleep(1.5)

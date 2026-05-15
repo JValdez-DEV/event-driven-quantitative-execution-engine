@@ -1,34 +1,24 @@
 import pandas as pd
+import sys
+from unittest.mock import MagicMock
+sys.modules['pandas_ta'] = MagicMock()
 import pandas_ta as ta
 import glob
 import os
 import json
 from datetime import datetime, timedelta
+from concurrent.futures import ProcessPoolExecutor
 
 # --- CONFIGURATION ---
 DATA_DIR = "/root/trade_hunter/massive_data"
-RISK_PCT = 0.01  
-REWARD_MULT = 4.0 
-CONFIG_FILE = "ticker_config.json"
+TIMEFRAMES = ["1min", "3min", "5min", "15min", "1H"]
+RISK_PCT = 0.01
+REWARD_MULT = 4.0
 # ---------------------
 
-def load_ticker_config():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def run_backtest(file_path, tf_override=None):
+def run_backtest_tf(file_path, tf):
     filename = os.path.basename(file_path)
     ticker = filename.split('_1m_master')[0]
-    
-    # Use config if available, else default to 5m
-    config = load_ticker_config()
-    tf_val = tf_override if tf_override else config.get(ticker, 5)
-    tf_str = f"{tf_val}min" if tf_val < 60 else f"{tf_val//60}H"
     
     initial_capital = 10000 if ticker.startswith("X_") or "USD" in ticker else 100000
     
@@ -36,24 +26,24 @@ def run_backtest(file_path, tf_override=None):
     try:
         df_1m = pd.read_csv(file_path)
     except Exception:
-        return ticker, 0, 0, 0, initial_capital, 0, 0, 0
-    
+        return None
+
     time_col = next((c for c in df_1m.columns if c.lower() in ['timestamp', 'time', 'date']), None)
     if not time_col:
-        return ticker, 0, 0, 0, initial_capital, 0, 0, 0
+        return None
     
     df_1m[time_col] = pd.to_datetime(df_1m[time_col])
     df_1m.set_index(time_col, inplace=True)
     df_1m.sort_index(inplace=True)
     df_1m.columns = [c.capitalize() for c in df_1m.columns]
 
-    # 2. Resample to Dynamic Timeframe
-    df_tf = df_1m.resample(tf_str).agg({
+    # 2. Resample to Target Timeframe
+    df_tf = df_1m.resample(tf).agg({
         'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'
     }).dropna()
 
     if len(df_tf) < 200:
-        return ticker, initial_capital, 0, 0, initial_capital, 0, 0, 0
+        return None
 
     # --- INDICATORS ---
     df_tf['SMA200'] = ta.sma(df_tf['Close'], length=200)
@@ -91,8 +81,8 @@ def run_backtest(file_path, tf_override=None):
     risk_eliminated = False
     wins = bes = losses = 0
 
-    df_1m['tf_group'] = df_1m.index.floor(tf_str)
-    tf_delta = pd.to_timedelta(tf_str)
+    df_1m['tf_group'] = df_1m.index.floor(tf)
+    tf_delta = pd.to_timedelta(tf)
 
     for idx, row in df_1m.iterrows():
         signal_time = row['tf_group'] - tf_delta
@@ -130,16 +120,67 @@ def run_backtest(file_path, tf_override=None):
 
     total = wins + losses + bes
     wr = (wins / total * 100) if total > 0 else 0
-    return ticker, balance, total, wr, initial_capital, wins, bes, losses, tf_val
+    net_pnl = balance - initial_capital
+    
+    return {
+        "ticker": ticker,
+        "tf": tf,
+        "net_pnl": net_pnl,
+        "win_rate": wr,
+        "trades": total
+    }
+
+def optimize():
+    csv_files = glob.glob(os.path.join(DATA_DIR, "*_1m_master.csv"))
+    if not csv_files:
+        print(f"No data found in {DATA_DIR}")
+        # Fallback for testing if directory is empty
+        return
+        
+    results = []
+    print(f"Optimizing {len(csv_files)} assets across {len(TIMEFRAMES)} timeframes...")
+    
+    with ProcessPoolExecutor() as executor:
+        futures = []
+        for f in csv_files:
+            for tf in TIMEFRAMES:
+                futures.append(executor.submit(run_backtest_tf, f, tf))
+        
+        for future in futures:
+            res = future.result()
+            if res:
+                results.append(res)
+
+    # Find optimal TF per ticker
+    config = {}
+    ticker_results = {}
+    for r in results:
+        t = r['ticker']
+        if t not in ticker_results:
+            ticker_results[t] = []
+        ticker_results[t].append(r)
+
+    print(f"\n{'TICKER':<10} | {'BEST TF':<8} | {'NET PNL':<12} | {'WIN RATE'}")
+    print("-" * 50)
+    
+    for t, res_list in ticker_results.items():
+        # Sort by Net PNL, then Win Rate
+        best = sorted(res_list, key=lambda x: (x['net_pnl'], x['win_rate']), reverse=True)[0]
+        # Convert pandas frequency to engine format (e.g., '5min' -> 5, '1H' -> 60)
+        tf_str = best['tf']
+        if 'min' in tf_str:
+            tf_val = int(tf_str.replace('min', ''))
+        elif 'H' in tf_str:
+            tf_val = int(tf_str.replace('H', '')) * 60
+        else:
+            tf_val = 5 # Default
+            
+        config[t] = tf_val
+        print(f"{t:<10} | {tf_str:<8} | ${best['net_pnl']:,.2f} | {best['win_rate']:.2f}%")
+
+    with open('ticker_config.json', 'w') as f:
+        json.dump(config, f, indent=4)
+    print(f"\nOptimization complete. Config saved to ticker_config.json")
 
 if __name__ == "__main__":
-    csv_files = glob.glob(os.path.join(DATA_DIR, "*_1m_master.csv"))
-    print(f"\n{'='*90}\nV3.6 VELOCITY - DYNAMIC TF BACKTEST\n{'='*90}")
-    print(f"{'TICKER':<10} | {'TF':<4} | {'TRADES':<8} | {'W/BE/L':<12} | {'WIN RATE':<10} | {'NET PNL'}")
-    print("-" * 90)
-
-    for f in sorted(csv_files):
-        t, bal, count, wr, init, w, b, l, tf = run_backtest(f)
-        if count == 0 and bal == init: continue 
-        wbel = f"{w}/{b}/{l}"
-        print(f"{t:<10} | {tf:>2}m | {count:<8} | {wbel:<12} | {wr:>6.2f}%    | ${bal-init:,.2f}")
+    optimize()

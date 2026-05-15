@@ -10,7 +10,7 @@ DATA_DIR = "/root/trade_hunter/massive_data"
 TIMEFRAMES = ["1min", "3min", "5min", "15min", "1h"]
 RISK_PCT = 0.01
 REWARD_MULT = 4.0
-LOOKBACK_DAYS = 180 # 6 Months Lookback Limit
+LOOKBACK_DAYS = 30 # 30-Day Lookback Limit for 1GB RAM Environments
 # ---------------------
 
 # Mock pandas_ta if not available
@@ -167,12 +167,19 @@ def optimize():
     print(f"Mode: SEQUENTIAL EXECUTION | Lookback: {LOOKBACK_DAYS} Days")
     
     # --- SEQUENTIAL EXECUTION ---
+    # Process exactly one ticker/timeframe pair at a time. The finally block
+    # guarantees cleanup after every iteration, including failed runs.
     for f in csv_files:
         for tf in TIMEFRAMES:
-            print(f"Processing {os.path.basename(f)} @ {tf}...")
-            res = run_backtest_tf(f, tf)
-            if res:
-                results.append(res)
+            res = None
+            try:
+                print(f"Processing {os.path.basename(f)} @ {tf}...")
+                res = run_backtest_tf(f, tf)
+                if res:
+                    results.append(res)
+            finally:
+                del res
+                gc.collect()
 
     # Find optimal TF per ticker
     config = {}

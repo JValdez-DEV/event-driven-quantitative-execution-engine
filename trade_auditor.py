@@ -17,13 +17,13 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
 client = TradingClient(API_KEY, SECRET_KEY, paper=True)
 
-# --- AUDIT PARAMETERS ---
+# --- AUDIT & PROP FIRM PARAMETERS ---
 WIN_RATE_THRESHOLD = 60.0  
 MIN_TRADES_REQUIRED = 20   
+PROP_FIRM_DD_LIMIT = 5.0 # Max 5% Daily Drawdown
 LEDGER_PATH = '/root/trade_hunter/strategy_ledger.json'
 
 def load_current_parameters():
-    """Snapshots the active strategy parameters to link them to the performance."""
     params = {"crypto": {}, "equity": {}}
     try:
         with open('/root/trade_hunter/crypto_config.json', 'r') as f:
@@ -35,7 +35,6 @@ def load_current_parameters():
     return params
 
 def save_to_ledger(audit_data):
-    """Saves the graded performance and the exact parameters to the local hard drive."""
     ledger = []
     if os.path.exists(LEDGER_PATH):
         try:
@@ -51,28 +50,34 @@ def save_to_ledger(audit_data):
     print(f"[{audit_data['timestamp']}] Ledger Updated. Data saved to disk.")
 
 def send_discord_report(audit_data):
-    if audit_data['win_rate'] >= WIN_RATE_THRESHOLD and audit_data['total_trades'] >= MIN_TRADES_REQUIRED:
-        color = 5763719 # Green
-        status = "🟢 SYSTEM VERIFIED: CLEARED FOR LIVE CAPITAL"
-        next_steps = "Mathematical edge confirmed. Safe to swap API keys to Live environment."
+    if audit_data['daily_drawdown_pct'] >= PROP_FIRM_DD_LIMIT:
+        color = 15548997 # Red (Fatal Fail)
+        status = "🔴 EVALUATION FAILED: 5% DRAWDOWN BREACHED"
+        next_steps = "Halt trading immediately. Strategy requires strict risk scaling."
+    elif audit_data['win_rate'] >= WIN_RATE_THRESHOLD and audit_data['total_trades'] >= MIN_TRADES_REQUIRED:
+        color = 5763719 # Green (Pass)
+        status = "🟢 SYSTEM VERIFIED: PROP FIRM READY"
+        next_steps = "Mathematical edge confirmed. Safe to deploy to Evaluation Server."
     else:
-        color = 15548997 # Red
+        color = 16766720 # Yellow (Pending)
         status = "🟡 COLLECTING DATA / BELOW THRESHOLD"
-        next_steps = f"Need {max(0, MIN_TRADES_REQUIRED - audit_data['total_trades'])} more trades or higher win rate."
+        next_steps = f"Need {max(0, MIN_TRADES_REQUIRED - audit_data['total_trades'])} more trades. Keep DD below 5%."
 
     payload = {
         "embeds": [{
-            "title": "Trade Hunter V3.6 | Parameter Ledger",
+            "title": "Trade Hunter V3.7 | Institutional Ledger",
             "color": color,
             "fields": [
                 {"name": "System Status", "value": status, "inline": False},
-                {"name": "Total Closed Trades", "value": str(audit_data['total_trades']), "inline": True},
+                {"name": "Total Trades", "value": str(audit_data['total_trades']), "inline": True},
                 {"name": "Wins", "value": str(audit_data['wins']), "inline": True},
                 {"name": "Losses", "value": str(audit_data['losses']), "inline": True},
-                {"name": "Current Win Rate", "value": f"{audit_data['win_rate']:.2f}%", "inline": False},
+                {"name": "Win Rate", "value": f"{audit_data['win_rate']:.2f}%", "inline": True},
+                {"name": "Daily Drawdown", "value": f"{audit_data['daily_drawdown_pct']:.2f}% (Max 5%)", "inline": True},
+                {"name": "Account Equity", "value": f"${audit_data['current_equity']:,.2f}", "inline": True},
                 {"name": "Directive", "value": next_steps, "inline": False}
             ],
-            "footer": {"text": "Local Ledger Updated | Hourly Sync"}
+            "footer": {"text": "Prop Firm Audit | Hourly Sync"}
         }]
     }
     try:
@@ -81,8 +86,16 @@ def send_discord_report(audit_data):
         print(f"Webhook Error: {e}")
 
 def run_performance_audit():
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Executing Alpaca Ledger Audit...", flush=True)
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Executing Prop Firm Audit...", flush=True)
     try:
+        account = client.get_account()
+        current_equity = float(account.portfolio_value)
+        last_equity = float(account.last_equity) 
+        
+        daily_drawdown_pct = 0.0
+        if last_equity > 0 and current_equity < last_equity:
+            daily_drawdown_pct = ((last_equity - current_equity) / last_equity) * 100
+
         req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=500)
         closed_orders = client.get_orders(req)
         
@@ -103,13 +116,14 @@ def run_performance_audit():
 
         win_rate = (wins / total_trades) * 100 if total_trades > 0 else 0.0
 
-        # Package the active snapshot
         audit_data = {
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "total_trades": total_trades,
             "wins": wins,
             "losses": losses,
             "win_rate": win_rate,
+            "current_equity": current_equity,
+            "daily_drawdown_pct": daily_drawdown_pct,
             "active_parameters": load_current_parameters()
         }
 
@@ -120,7 +134,7 @@ def run_performance_audit():
         print(f"Audit Failure: {e}", flush=True)
 
 if __name__ == "__main__":
-    print("Trade Hunter Ledger Online. Syncing and saving every 60 minutes.")
+    print("Trade Hunter Prop Firm Ledger Online. Syncing every 60 minutes.")
     while True:
         run_performance_audit()
         time.sleep(3600)

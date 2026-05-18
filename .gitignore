@@ -5,3 +5,4 @@ __pycache__/
 *.json
 massive_data/
 .DS_Store
+strategy_ledger.json

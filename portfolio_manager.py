@@ -1,9 +1,12 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 import pandas_ta as ta
 import os
 
 # --- PORTFOLIO CONFIGURATION ---
-DATA_DIR = "/root/trade_hunter/massive_data"
+DATA_DIR = str(BASE_DIR / "massive_data")
 ATR_RISK_MULTIPLIER = 1.5  
 REWARD_MULTIPLIER = 4.0    
 

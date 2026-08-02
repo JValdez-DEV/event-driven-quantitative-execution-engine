@@ -1,8 +1,11 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 import os
 from datetime import datetime
 
-LEDGER_FILE = '/root/trade_hunter/trade_ledger.csv'
+LEDGER_FILE = str(BASE_DIR / "trade_ledger.csv")
 
 def generate_daily_report():
     if not os.path.exists(LEDGER_FILE):
@@ -27,7 +30,7 @@ def generate_daily_report():
     r_units = (wins * 4) - losses
     
     print("\n" + "═"*45)
-    print(f" 🦅 TRADE HUNTER | DAILY PERFORMANCE REPORT")
+    print(f" 🦅 EVENT-DRIVEN QUANTITATIVE EXECUTION ENGINE | DAILY PERFORMANCE REPORT")
     print(f" DATE: {today}")
     print("═"*45)
     print(f"[*] Total Trades Found : {len(daily_df)}")

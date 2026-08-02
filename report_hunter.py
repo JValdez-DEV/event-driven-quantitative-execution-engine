@@ -1,9 +1,12 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 import os
 import sys
 
 def run_audit(mode="LIVE"):
-    file_path = '/root/trade_hunter/backtest_ledger.csv' if mode == "BACKTEST" else '/root/trade_hunter/trade_ledger.csv'
+    file_path = str(BASE_DIR / "backtest_ledger.csv") if mode == "BACKTEST" else str(BASE_DIR / "trade_ledger.csv")
     title = "180-DAY BACKTEST" if mode == "BACKTEST" else "LIVE PAPER TRADES"
     
     print(f"\n[INITIATING {mode} LEDGER AUDIT...]")
@@ -19,7 +22,7 @@ def run_audit(mode="LIVE"):
             return
             
         print("="*65)
-        print(f" 🦅 TRADE HUNTER V4.7 | {title}")
+        print(f" 🦅 EVENT-DRIVEN QUANTITATIVE EXECUTION ENGINE V4.7 | {title}")
         print("="*65)
         
         if mode == "BACKTEST":

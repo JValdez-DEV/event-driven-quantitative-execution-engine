@@ -1,4 +1,4 @@
-# Trade Hunter V3.6 (Velocity Architecture)
+# Event-Driven Quantitative Execution Engine V3.6 (Velocity Architecture)
 
 ## Core Objective
 An institutional-grade, fully autonomous algorithmic trading system designed for high-expectancy execution across Equities (Alpaca API) and Crypto (CCXT). The system runs as a persistent daemon, identifying structural imbalances and executing with strict risk telemetry.
@@ -7,7 +7,7 @@ An institutional-grade, fully autonomous algorithmic trading system designed for
 - **Host:** DigitalOcean Droplet (Ubuntu 24.04)
 - **Language:** Python 3.12
 - **Data Analysis:** pandas_ta, numpy (Vectorized for microsecond calculation)
-- **Deployment:** systemd (trade_hunter.service)
+- **Deployment:** systemd (event-driven-quantitative-execution-engine.service)
 - **State Management:** Git CI/CD Pipeline
 
 ## Strategy Logic: Velocity FVG
@@ -31,7 +31,7 @@ The bot strictly operates on the **5-Minute (5m)** timeframe. A trade is only ex
 
 ## Maintenance Commands
 **Audit Live Stream:**
-journalctl -u trade_hunter.service -f
+journalctl -u event-driven-quantitative-execution-engine.service -f
 
 **Hot-Reload Daemon (Post-Git Pull):**
-systemctl restart trade_hunter.service
+systemctl restart event-driven-quantitative-execution-engine.service

@@ -1,7 +1,10 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import sqlite3
 import pandas as pd
 
-DB_FILE = "/root/trade_hunter/active_trades.db"
+DB_FILE = str(BASE_DIR / "active_trades.db")
 
 def generate_report():
     try:
@@ -25,7 +28,7 @@ def generate_report():
 
         # Display Dashboard
         print(f"\n{'='*45}")
-        print(f" TRADE HUNTER V3.4 | PERFORMANCE DASHBOARD")
+        print(f" EVENT-DRIVEN QUANTITATIVE EXECUTION ENGINE V3.4 | PERFORMANCE DASHBOARD")
         print(f"{'='*45}")
         print(f" Total Trades : {total_trades}")
         print(f" Wins         : {wins}")

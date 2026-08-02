@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import asyncio
 import os
 import sqlite3
@@ -6,9 +9,9 @@ import ccxt.async_support as ccxt_async
 from alpaca.trading.client import TradingClient
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
-DB_FILE = "/root/trade_hunter/active_trades.db"
+DB_FILE = str(BASE_DIR / "active_trades.db")
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 ROUTING_MATRIX = [
@@ -23,7 +26,7 @@ async def send_critical_alert():
             "title": "🚨 SYSTEM LIQUIDATION INITIATED 🚨",
             "description": "The Emergency Kill Switch was manually triggered. All positions closed. State wiped.",
             "color": 16711680, # Pure Red
-            "footer": {"text": "Trade Hunter V3.4 | Panic Protocol"}
+            "footer": {"text": "Event-Driven Quantitative Execution Engine V3.4 | Panic Protocol"}
         }]
     }
     async with aiohttp.ClientSession() as session:
@@ -58,7 +61,7 @@ async def liquidate_kraken():
 def liquidate_alpaca():
     print("[*] Liquidating Alpaca positions and cancelling pending orders...")
     try:
-        client = TradingClient(os.getenv('ALPACA_KEY'), os.getenv('ALPACA_SECRET'), paper=True)
+        client = TradingClient(os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_KEY"), os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_SECRET"), paper=True)
         cancel_statuses = client.close_all_positions(cancel_orders=True)
         for order in cancel_statuses:
             print(f"    -> Order dispatched for {order.symbol}")

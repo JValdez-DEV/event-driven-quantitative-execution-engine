@@ -1,9 +1,12 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os
 import requests
 from dotenv import load_dotenv
 
 # Load the environment variables from your droplet
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
 def run_communication_audit():
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
@@ -13,7 +16,7 @@ def run_communication_audit():
         return
 
     payload = {
-        "username": "Trade Hunter Audit",
+        "username": "Event-Driven Quantitative Execution Engine Audit",
         "content": "⚠️ **V3.6 Communication Audit: SUCCESSFUL**\nEnvironment Link: Verified\nSource: DigitalOcean Droplet"
     }
 

@@ -1,19 +1,22 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os, time, csv, pandas as pd, pandas_ta as ta
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import requests
 import alpaca_trade_api as tradeapi
 
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
 # Configuration
 CRYPTO = ['XBTUSD', 'ETHUSD']
 STOCKS = ['NVDA', 'TSLA', 'AMD', 'MSFT']
 BACKTEST_DAYS = 180
-CSV_FILE = '/root/trade_hunter/backtest_ledger.csv'
+CSV_FILE = str(BASE_DIR / "backtest_ledger.csv")
 
 # Alpaca Setup
-api = tradeapi.REST(os.getenv('ALPACA_KEY'), os.getenv('ALPACA_SECRET'), 'https://paper-api.alpaca.markets', 'v2')
+api = tradeapi.REST(os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_KEY"), os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_SECRET"), os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"), 'v2')
 
 def get_crypto_data(pair, days):
     """Fetches historical 15m data from Kraken."""

@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os
 import logging
 import pandas as pd
@@ -7,14 +10,14 @@ from alpaca_trade_api.rest import REST, TimeFrame
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
 class VelocityBacktester:
     def __init__(self):
         # Maps exact keys used by your Live Engine
         api_key = os.getenv('ALPACA_API_KEY')
         api_secret = os.getenv('ALPACA_API_SECRET')
-        base_url = os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+        base_url = os.getenv('ALPACA_BASE_URL', os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"))
         
         if not api_key or not api_secret:
             logging.error("[CRITICAL] ALPACA_API_KEY or ALPACA_API_SECRET missing from .env")

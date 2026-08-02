@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -9,8 +12,8 @@ REWARD_RATIO = 4.0      # Hybrid Percoco 1:4 Target
 
 def generate_excel_log():
     # Path to your historical backtest source or ledger
-    ledger_path = '/root/trade_hunter/trade_ledger.csv'
-    output_path = '/root/trade_hunter/backtest_visualized.csv'
+    ledger_path = str(BASE_DIR / "trade_ledger.csv")
+    output_path = str(BASE_DIR / "backtest_visualized.csv")
     
     if not pd.io.common.file_exists(ledger_path):
         print("[!] No ledger found to export.")

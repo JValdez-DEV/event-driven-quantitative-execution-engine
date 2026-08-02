@@ -1,12 +1,15 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os, csv, pandas as pd
 from dotenv import load_dotenv
 import alpaca_trade_api as tradeapi
 import requests
 
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 LOCAL_CRYPTO_START = 10000.00
-LEDGER_FILE = '/root/trade_hunter/trade_ledger.csv'
-ALPACA_API = tradeapi.REST(os.getenv('ALPACA_KEY'), os.getenv('ALPACA_SECRET'), 'https://paper-api.alpaca.markets', 'v2')
+LEDGER_FILE = str(BASE_DIR / "trade_ledger.csv")
+ALPACA_API = tradeapi.REST(os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_KEY"), os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_SECRET"), os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"), 'v2')
 
 def audit_accounts():
     alpaca = ALPACA_API.get_account()
@@ -32,7 +35,7 @@ def audit_accounts():
                 crypto_cash += (exit_price * qty) - (entry * qty) # Simplified realized logic
 
     print("\n" + "="*50)
-    print(" 🦅 TRADE HUNTER | FINALIZED AUDIT")
+    print(" 🦅 EVENT-DRIVEN QUANTITATIVE EXECUTION ENGINE | FINALIZED AUDIT")
     print("="*40)
     print(f"[ALPACA STOCKS] Equity: ${float(alpaca.equity):,.2f}")
     print(f"[KRAKEN CRYPTO] Net Virtual Eq: ${crypto_cash:,.2f} | Open: {open_count}")

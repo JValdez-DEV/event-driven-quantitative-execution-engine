@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os
 import time
 from datetime import datetime
@@ -6,7 +9,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 # Load environment variables (Strict zero-trust protocol)
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
 class SentinelAgent:
     def __init__(self):

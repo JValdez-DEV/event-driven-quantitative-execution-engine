@@ -1,8 +1,11 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os, time, csv, pandas as pd, pandas_ta as ta
 from datetime import datetime
 import requests
 
-CSV_FILE = '/root/trade_hunter/trade_ledger.csv'
+CSV_FILE = str(BASE_DIR / "trade_ledger.csv")
 CRYPTO = ['XBTUSD', 'ETHUSD', 'SOLUSD', 'ADAUSD', 'DOTUSD', 'MATICUSD']
 STRATEGY = "V4.8 SAFE PERCOCO"
 STARTING_CASH = 10000.00  # Your fixed cap

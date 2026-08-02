@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os
 import pandas as pd
 from datetime import datetime, timedelta
@@ -7,7 +10,7 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 # --- SECURE CREDENTIAL LOADING ---
-load_dotenv('/root/trade_hunter/.env')
+load_dotenv(BASE_DIR / ".env")
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_API_SECRET") # Updated to match your specific .env variable name
 
@@ -15,7 +18,7 @@ if not API_KEY or not SECRET_KEY:
     raise ValueError("CRITICAL ERROR: Alpaca credentials not found in .env file.")
 
 # --- CONFIGURATION ---
-DATA_DIR = "/root/trade_hunter/massive_data"
+DATA_DIR = str(BASE_DIR / "massive_data")
 LOOKBACK_DAYS = 180
 SYMBOLS = ["QQQ", "SPY", "PLTR", "COIN", "META", "AAPL"]
 

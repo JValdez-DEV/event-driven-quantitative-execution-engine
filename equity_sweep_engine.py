@@ -1,4 +1,7 @@
-# /root/trade_hunter/equity_sweep_engine.py
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+# /root/event-driven-quantitative-execution-engine/equity_sweep_engine.py
 from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 
@@ -30,7 +33,7 @@ def evaluate_live_bar(bar, params, client):
         except Exception:
             pass
             
-        # --- 3. MATHEMATICAL TARGET MATRIX & FAIL-SAFE ---
+        # --- 3. DYNAMIC TARGET MATRIX & BROKER LIQUIDITY CHECK ---
         entry_price = float(bar.close)
         buffer_pct = float(params.get('stop_wick_buffer_pct', 0.005))
         rr = float(params.get('reward_risk', 2.0))
@@ -40,17 +43,29 @@ def evaluate_live_bar(bar, params, client):
         take_profit = round(entry_price + (risk_per_share * rr), 2)
         
         target_risk_usd = 100.0
-        max_position_size = 3000.0 # LIVE ACCOUNT CAP
+        STRATEGIC_MAX_CAP = 3000.0 
+        
+        # Pull exact available broker liquidity dynamically
+        try:
+            account = client.get_account()
+            available_buying_power = float(account.buying_power)
+        except Exception:
+            available_buying_power = 0.0
+            
+        # Hard cap is the lesser of our $3k strategy limit or actual broker cash left
+        effective_cap = min(STRATEGIC_MAX_CAP, available_buying_power)
         
         # Initial sizing attempt
         qty = round(target_risk_usd / risk_per_share, 0) if risk_per_share > 0 else 0
         
-        # Override if position size is too massive
+        # Dynamic down-scale override
         total_investment = qty * entry_price
-        if total_investment > max_position_size:
-            qty = round(max_position_size / entry_price, 0)
+        if total_investment > effective_cap:
+            qty = round(effective_cap / entry_price, 0)
             
-        if qty <= 0: return None
+        if qty <= 0:
+            print(f"⚠️ [SKIPPED] {sym} ignored. Effective buying power cap (${effective_cap:.2f}) insufficient for 1 share.", flush=True)
+            return None
 
         # --- 4. SUBMIT HARD BRACKET ORDER TO EXCHANGE ---
         try:
@@ -64,7 +79,7 @@ def evaluate_live_bar(bar, params, client):
                 stop_loss=StopLossRequest(stop_price=stop_loss)
             )
             client.submit_order(order_data=order_data)
-            action_text = "🟢 MARKET BUY (CAPPED BRACKET OCO)"
+            action_text = f"🟢 MARKET BUY (DYNAMIC CAP: ${effective_cap:,.2f})"
             color_hex = 5763719
         except Exception as e:
             action_text = f"🔴 EQUITY REJECTED: {e}"
@@ -79,7 +94,7 @@ def evaluate_live_bar(bar, params, client):
                 "Quantity": int(qty),
                 "Entry Price": f"${entry_price:,.2f}",
                 "Hard Stop (1R)": f"${stop_loss:,.2f}",
-                "Take Profit ({rr}R)": f"${take_profit:,.2f}",
+                f"Take Profit ({rr}R)": f"${take_profit:,.2f}",
                 "Trigger": f"Vol Anomaly | Cur: {bar.volume:,.0f} vs Avg: {avg_volume:,.0f}"
             }
         }

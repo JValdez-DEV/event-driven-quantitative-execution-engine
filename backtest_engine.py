@@ -1,10 +1,13 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 import pandas_ta as ta
 import glob
 import os
 
 # --- V3.6 ROUTING, RISK & ANALYST CONFIG ---
-DATA_DIR = "/root/trade_hunter/massive_data"
+DATA_DIR = str(BASE_DIR / "massive_data")
 RISK_PCT = 0.01
 REWARD_MULTIPLIER = 4.0
 

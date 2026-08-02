@@ -1,4 +1,7 @@
-# /root/trade_hunter/crypto_sweep_engine.py
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+# /root/event-driven-quantitative-execution-engine/crypto_sweep_engine.py
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
@@ -62,24 +65,41 @@ def evaluate_live_bar(bar, params, client):
     if avg_volume == 0: avg_volume = 0.0001
     vol_multiplier = float(params.get('volume_multiplier', 1.5))
     
-    # --- 3. ENTRY TRIGGER & FAIL-SAFE ---
+    # --- 3. ENTRY TRIGGER & LIVE BALANCE INTERCEPTION ---
     if bar.volume > (avg_volume * vol_multiplier):
         
         buffer_pct = float(params.get('stop_wick_buffer_pct', 0.005))
         stop_loss_delta = current_price * buffer_pct
         
         target_risk_usd = 100.0
-        max_position_size = 3000.0 # LIVE ACCOUNT CAP
+        STRATEGIC_MAX_CAP = 3000.0 
+        
+        # Pull STRICT NON-MARGINABLE broker liquidity dynamically for Crypto
+        try:
+            account = client.get_account()
+            available_crypto_power = float(account.non_marginable_buying_power)
+        except Exception:
+            available_crypto_power = 0.0
+            
+        effective_cap = min(STRATEGIC_MAX_CAP, available_crypto_power)
         
         # Initial sizing
         qty = round(target_risk_usd / stop_loss_delta, 4) if stop_loss_delta > 0 else 0
         
-        # Override if too massive
+        # Dynamic down-scale override
         total_investment = qty * current_price
-        if total_investment > max_position_size:
-            qty = round(max_position_size / current_price, 4)
+        if total_investment > effective_cap:
+            qty = round(effective_cap / current_price, 4)
+            total_investment = qty * current_price
         
-        if qty <= 0: return None
+        # NEW: Alpaca Hard Minimum Notional Floor ($10.00)
+        if total_investment < 10.0:
+            print(f"⚠️ [SKIPPED] Crypto {sym} ignored. Effective capital (${effective_cap:.2f}) yields ${total_investment:.2f} investment (Below $10 Alpaca Min).", flush=True)
+            return None
+
+        if qty <= 0.0001:
+            print(f"⚠️ [SKIPPED] Crypto {sym} ignored. Non-Marginable cap (${effective_cap:.2f}) insufficient.", flush=True)
+            return None
 
         # --- 4. LIVE EXECUTION ---
         try:
@@ -98,7 +118,7 @@ def evaluate_live_bar(bar, params, client):
                 "trail_pct": buffer_pct
             }
             
-            action_text = "🟢 MARKET BUY (CAPPED LOCAL MONITORING)"
+            action_text = f"🟢 MARKET BUY (NON-MARGIN CAP: ${effective_cap:,.2f})"
             color_hex = 5763719
         except Exception as e:
             action_text = f"🔴 ENTRY FAILED: {e}"

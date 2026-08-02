@@ -1,11 +1,14 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import alpaca_trade_api as tradeapi
 import os, time, requests
 import pandas as pd
 import pandas_ta as ta
 from dotenv import load_dotenv
 
-load_dotenv()
-api = tradeapi.REST(os.getenv('ALPACA_KEY'), os.getenv('ALPACA_SECRET'), 'https://paper-api.alpaca.markets', 'v2')
+load_dotenv(BASE_DIR / ".env")
+api = tradeapi.REST(os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_KEY"), os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_API_SECRET") or os.getenv("ALPACA_SECRET"), os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"), 'v2')
 
 # Configuration
 STOCKS = ['NVDA', 'AMD', 'AAPL', 'TSLA', 'MSFT', 'QQQ']

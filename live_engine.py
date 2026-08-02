@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import csv
 import json
 import os
@@ -10,7 +13,7 @@ import pandas_ta as ta
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
 # --- V3.6 PRODUCTION CONFIGURATION ---
 DEFAULT_ROUTING = {
@@ -28,10 +31,10 @@ DISCORD_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # --- SYSTEM FILES ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-STATS_FILE = "/root/trade_hunter/daily_stats.json"
-LEDGER_FILE = "/root/trade_hunter/kraken_paper_ledger.json"
-ACTIVE_TRADES_FILE = "/root/trade_hunter/active_trades.json"
-MASTER_CSV_FILE = "/root/trade_hunter/master_trade_log.csv"
+STATS_FILE = str(BASE_DIR / "daily_stats.json")
+LEDGER_FILE = str(BASE_DIR / "kraken_paper_ledger.json")
+ACTIVE_TRADES_FILE = str(BASE_DIR / "active_trades.json")
+MASTER_CSV_FILE = str(BASE_DIR / "master_trade_log.csv")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "ticker_config.json")
 # -------------------------------------
 
@@ -81,7 +84,7 @@ def notify_discord(title, fields, color=5763719, description=None):
             {"name": k, "value": str(v), "inline": False if k in ["Trigger Logic", "Action"] else True}
             for k, v in fields.items()
         ],
-        "footer": {"text": f"Trade Hunter V3.6 | Dynamic Telemetry | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"},
+        "footer": {"text": f"Event-Driven Quantitative Execution Engine V3.6 | Dynamic Telemetry | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"},
     }
     if description:
         embed["description"] = description

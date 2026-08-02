@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 import glob
 import os
@@ -6,7 +9,7 @@ import gc
 from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
-DATA_DIR = "/root/trade_hunter/massive_data"
+DATA_DIR = str(BASE_DIR / "massive_data")
 TIMEFRAMES = ["1min", "3min", "5min", "15min", "1h"]
 RISK_PCT = 0.01
 REWARD_MULT = 4.0

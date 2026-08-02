@@ -1,108 +1,127 @@
 #!/usr/bin/env python3
+
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import os
 import json
-import asyncio
+import threading
+import time
 import requests
 from dotenv import load_dotenv
 from alpaca.data.live import StockDataStream, CryptoDataStream
 from alpaca.data.models import Bar
 from alpaca.trading.client import TradingClient
 
-# --- ENVIRONMENT LOAD ---
-ENV_PATH = '/root/trade_hunter/.env'
+ENV_PATH = str(BASE_DIR / ".env")
 load_dotenv(ENV_PATH)
 API_KEY = os.getenv("ALPACA_API_KEY")
 SECRET_KEY = os.getenv("ALPACA_API_SECRET")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK_URL")
 
 if not API_KEY or not SECRET_KEY:
-    raise SystemExit("[CRITICAL] Alpaca credentials missing from .env")
+    raise SystemExit("[CRITICAL] Credentials missing from .env")
 
-# --- INITIALIZE CLIENTS ---
+# --- INITIALIZE CORE CLIENTS ---
 trading_client = TradingClient(API_KEY, SECRET_KEY, paper=True)
-stock_stream = StockDataStream(API_KEY, SECRET_KEY)
-crypto_stream = CryptoDataStream(API_KEY, SECRET_KEY)
 
 # --- LOAD CONFIGURATIONS ---
-with open('/root/trade_hunter/crypto_config.json', 'r') as f:
+with open(str(BASE_DIR / "crypto_config.json"), 'r') as f:
     CRYPTO_CONFIG = json.load(f)
 
-EQUITY_TICKERS = ["AMD", "MSFT", "TSLA", "QQQ", "SPY", "COIN", "PLTR"]
-CRYPTO_TICKERS = list(CRYPTO_CONFIG.keys())
+try:
+    with open(str(BASE_DIR / "equity_config.json"), 'r') as f:
+        EQUITY_CONFIG = json.load(f)
+except FileNotFoundError:
+    EQUITY_CONFIG = {}
 
-print(f"\n{'='*60}\nTRADE HUNTER V1 - MASTER ORCHESTRATOR [IMMEDIATE ALERTS ARMED]\n{'='*60}", flush=True)
+# --- IMPORT SECURE PRODUCTION ENGINE STACKS ---
+import crypto_sweep_engine
+import equity_sweep_engine
 
-# --- TRACKERS TO PREVENT TELEMETRY FLOODING ---
-crypto_test_fired = False
-equity_test_fired = False
+# Safely extract target ticker arrays from configuration parameters
+EQUITY_TICKERS = EQUITY_CONFIG.get("symbols", ["AMD", "MSFT", "TSLA", "QQQ", "SPY", "COIN", "PLTR"])
+if "MSFT" not in EQUITY_TICKERS:
+    EQUITY_TICKERS.append("MSFT")
 
-# --- DISCORD ALERT ENGINE ---
-def send_discord_alert(message):
-    if DISCORD_WEBHOOK:
-        try:
-            requests.post(DISCORD_WEBHOOK, json={"content": message})
-        except Exception as e:
-            print(f"[ALERT ERROR] Failed to send Discord ping: {e}", flush=True)
+CRYPTO_TICKERS = CRYPTO_CONFIG.get("symbols", ["BTC/USD", "ETH/USD"])
 
-# --- ROUTING LOGIC ---
+print(f"\n{'='*60}\nEVENT-DRIVEN QUANTITATIVE EXECUTION ENGINE V1.4 - MULTI-THREADED ROUTER ONLINE\n{'='*60}", flush=True)
+
+def send_rich_discord_alert(payload):
+    if not DISCORD_WEBHOOK or not payload: return
+    embed = {
+        "title": payload.get('title', 'System Alert'),
+        "color": payload.get('color', 0), 
+        "fields": []
+    }
+    for key, val in payload.get('fields', {}).items():
+        embed["fields"].append({"name": key, "value": str(val), "inline": False})
+    embed["footer"] = {"text": "Event-Driven Quantitative Execution Engine V3.9 | Dynamic Telemetry Stack"}
+    try:
+        requests.post(DISCORD_WEBHOOK, json={"embeds": [embed]})
+    except Exception as e:
+        print(f"[ALERT ERROR] Webhook failed: {e}", flush=True)
+
+# --- ASYNC HANDLERS (Required by Alpaca SDK) ---
 async def process_equity_tick(bar: Bar):
-    global equity_test_fired
-    print(f"[EQUITY TICK] {bar.symbol} | Close: {bar.close} | Vol: {bar.volume}", flush=True)
-    
-    # --- LIVE DATA VERIFICATION FROM MARKET ---
-    if not equity_test_fired:
-        test_msg = f"🔥 **LIVE EQUITY MARKET DATA RECEIVED** 🔥\n**Asset:** {bar.symbol}\n**Live Price:** ${bar.close}\n**Status:** Stream verified functional."
-        send_discord_alert(test_msg)
-        equity_test_fired = True
+    params = EQUITY_CONFIG.get(bar.symbol, EQUITY_CONFIG)
+    try:
+        payload = equity_sweep_engine.evaluate_live_bar(bar, params, trading_client)
+        if payload: send_rich_discord_alert(payload)
+    except Exception as e:
+        print(f"⚠️ [STOCK ENGINE ERROR]: {e}", flush=True)
 
 async def process_crypto_tick(bar: Bar):
-    global crypto_test_fired
-    
-    # [HOTFIX RETAINED] Convert Alpaca's live format "BTC/USD" back to our config format "X_BTCUSD"
     config_key = f"X_{bar.symbol.replace('/', '')}"
-    params = CRYPTO_CONFIG.get(config_key, {})
-    
-    print(f"[CRYPTO TICK] {bar.symbol} | Close: {bar.close} | Params: {params}", flush=True)
-    
-    # --- LIVE DATA VERIFICATION FROM MARKET ---
-    if not crypto_test_fired:
-        test_msg = f"🔥 **LIVE CRYPTO MARKET DATA RECEIVED** 🔥\n**Asset:** {bar.symbol}\n**Live Price:** ${bar.close}\n**Params Dynamic Load:** `{json.dumps(params)}`"
-        send_discord_alert(test_msg)
-        crypto_test_fired = True
+    params = CRYPTO_CONFIG.get(config_key, CRYPTO_CONFIG)
+    try:
+        payload = crypto_sweep_engine.evaluate_live_bar(bar, params, trading_client)
+        if payload: send_rich_discord_alert(payload)
+    except Exception as e:
+        print(f"⚠️ [CRYPTO ENGINE ERROR]: {e}", flush=True)
 
-# --- ASYNC WEBSOCKET DAEMON ---
-async def main():
-    print(f"[-] Subscribing to Equity Streams: {EQUITY_TICKERS}", flush=True)
-    stock_stream.subscribe_bars(process_equity_tick, *EQUITY_TICKERS)
-    
-    formatted_crypto = [t.replace('X_', '').replace('USD', '/USD') for t in CRYPTO_TICKERS]
-    print(f"[-] Subscribing to Crypto Streams: {formatted_crypto}", flush=True)
-    crypto_stream.subscribe_bars(process_crypto_tick, *formatted_crypto)
+# --- ISOLATED THREAD RUNNERS ---
+def run_equity_stream():
+    while True:
+        try:
+            print("[THREAD-1] Initializing Equity WebSocket...", flush=True)
+            stock_stream = StockDataStream(API_KEY, SECRET_KEY)
+            stock_stream.subscribe_bars(process_equity_tick, *EQUITY_TICKERS)
+            stock_stream.run() # Blocking call for this thread
+        except Exception as e:
+            print(f"[THREAD-1 FATAL] Equity Stream Crashed: {e}. Reconnecting in 5s...", flush=True)
+            time.sleep(5)
 
-    print("\n[+] Executing Immediate Connection Tests...", flush=True)
-    
-    # --- IMMEDIATE TELEMETRY PINGS ---
-    send_discord_alert("🟢 **Trade Hunter V1 Orchestrator Online** - Initializing Pipeline Daemon.")
-    
-    mock_crypto_key = "X_BTCUSD"
-    mock_crypto_params = CRYPTO_CONFIG.get(mock_crypto_key, {})
-    
-    immediate_equity_msg = f"📈 **EQUITY CONNECTION TEST (IMMEDIATE)** 📈\n**Status:** Webhook Integration Operational.\n**Target Matrix:** {EQUITY_TICKERS}"
-    immediate_crypto_msg = f"🪙 **CRYPTO CONNECTION TEST (IMMEDIATE)** 📈\n**Status:** Webhook Integration Operational.\n**Sample Config Vector ({mock_crypto_key}):** `{json.dumps(mock_crypto_params)}`"
-    
-    send_discord_alert(immediate_equity_msg)
-    send_discord_alert(immediate_crypto_msg)
-
-    print("[+] WebSockets Active. TELEMETRY MONITORING LIVE...\n", flush=True)
-    
-    await asyncio.gather(
-        stock_stream._run_forever(),
-        crypto_stream._run_forever()
-    )
+def run_crypto_stream():
+    while True:
+        try:
+            print("[THREAD-2] Initializing Crypto WebSocket...", flush=True)
+            crypto_stream = CryptoDataStream(API_KEY, SECRET_KEY)
+            crypto_stream.subscribe_bars(process_crypto_tick, *CRYPTO_TICKERS)
+            crypto_stream.run() # Blocking call for this thread
+        except Exception as e:
+            print(f"[THREAD-2 FATAL] Crypto Stream Crashed: {e}. Reconnecting in 5s...", flush=True)
+            time.sleep(5)
 
 if __name__ == "__main__":
+    startup_payload = {
+        "title": "🟢 Event-Driven Quantitative Execution Engine V1.4 Orchestrator Online",
+        "color": 5763719,
+        "fields": {"Status": "Live Multi-Threaded Sockets Armed", "Active Hunters": "Crypto Matrix, Equity Matrix"}
+    }
+    send_rich_discord_alert(startup_payload)
+    
+    # Ignite isolated background threads
+    t1 = threading.Thread(target=run_equity_stream, daemon=True)
+    t2 = threading.Thread(target=run_crypto_stream, daemon=True)
+    
+    t1.start()
+    t2.start()
+
     try:
-        asyncio.run(main())
+        # Keep main thread alive so background daemons don't die
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
-        print("\n[!] Orchestrator manually terminated. Shutting down WebSockets.")
-        send_discord_alert("🔴 **Trade Hunter V1 Orchestrator Offline** - Manual Shutdown.")
+        print("\nOrchestrator terminated cleanly.")

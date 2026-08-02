@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 import pandas as pd
 from massive import RESTClient
 from datetime import datetime, timedelta
@@ -5,14 +8,14 @@ import time
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(BASE_DIR / ".env")
 
 # --- V3.6 MASTER DATA CONFIGURATION ---
 MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
 WATCHLIST = ["NVDA", "TSLA", "AMD", "MSFT", "X:BTCUSD", "X:ETHUSD", "X:SOLUSD"]
 DAYS_HISTORY = 180
 CHUNK_DAYS = 14  # Smaller chunks for 1m density to prevent timeout
-DATA_DIR = "/root/trade_hunter/massive_data"
+DATA_DIR = str(BASE_DIR / "massive_data")
 
 # We hoard 1m only. The Backtest Engine will resample this into 
 # your "best-performing" timeframes (5m, 15m, etc.) locally.

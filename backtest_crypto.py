@@ -1,3 +1,6 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 from backtesting import Backtest, Strategy
 import pandas as pd
 import pandas_ta as ta
